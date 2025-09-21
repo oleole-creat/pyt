@@ -1,0 +1,275 @@
+
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{
+    font-family: Arial, sans-serif;
+    max-width: 900px;
+    margin: 28px auto;
+    padding: 0 16px;
+    color: #d0d0d0; s
+    background: #000; 
+}
+h1{font-size:1.3rem;color:#d0d0d0}
+.question{margin:14px 0;font-size:1.05rem;color:#d0d0d0}
+.question img{max-width:100%;display:block;margin:8px 0;border-radius:4px}
+.choices{list-style:none;padding:0;margin:0 0 12px}
+.choices li{margin:6px 0}
+button.choice{
+    width:100%;
+    text-align:left;
+    padding:10px;
+    border:1px solid rgba(255,255,255,0.08);
+    background:#111; 
+    color:#d0d0d0; 
+    cursor:pointer;
+    border-radius:4px;
+}
+button.choice.correct{background:#1f7a30;border-color:#1f7a30;color:#fff}
+button.choice.wrong{background:#7a1f1f;border-color:#7a1f1f;color:#fff}
+#ok{
+    background:#2ecc71;
+    color:#00220a;
+    border:0;
+    padding:10px 18px;
+    border-radius:6px;
+    cursor:pointer;
+    font-weight:600;
+}
+#ok:disabled{opacity:0.6;cursor:not-allowed}
+#status{color:#bfbfbf;margin-bottom:12px}
+footer{margin-top:18px;color:#9a9a9a;font-size:0.9rem}
+</style>
+
+<style>
+/* ciemne tło, jasnoszary tekst */
+body{
+    font-family: Arial, sans-serif;
+    max-width: 900px;
+    margin: 28px auto;
+    padding: 0 16px;
+    color: #d0d0d0; /* jasno szary tekst */
+    background: #000; /* czarne tło */
+}
+h1{font-size:1.3rem;color:#d0d0d0}
+.question{margin:14px 0;font-size:1.05rem;color:#d0d0d0}
+.question img{max-width:100%;display:block;margin:8px 0;border-radius:4px}
+.choices{list-style:none;padding:0;margin:0 0 12px}
+.choices li{margin:6px 0}
+button.choice{
+    width:100%;
+    text-align:left;
+    padding:10px;
+    border:1px solid rgba(255,255,255,0.08);
+    background:#111; /* ciemny przycisk */
+    color:#d0d0d0; /* jasny tekst na przycisku */
+    cursor:pointer;
+    border-radius:4px;
+}
+button.choice.correct{background:#1f7a30;border-color:#1f7a30;color:#fff}
+button.choice.wrong{background:#7a1f1f;border-color:#7a1f1f;color:#fff}
+#ok{
+    background:#2ecc71;
+    color:#00220a;
+    border:0;
+    padding:10px 18px;
+    border-radius:6px;
+    cursor:pointer;
+    font-weight:600;
+}
+#ok:disabled{opacity:0.6;cursor:not-allowed}
+#status{color:#bfbfbf;margin-bottom:12px}
+footer{margin-top:18px;color:#9a9a9a;font-size:0.9rem}
+</style>
+</head>
+<body>
+<h1>Losowe pytania (1–200)</h1>
+<div id="status">Ładowanie pytania.docx…</div>
+<div id="quiz"></div>
+<div style="margin-top:12px">
+    <button id="ok" disabled>OK</button>
+</div>
+<footer>Źródło: plik lokalny: pytania.docx</footer>
+
+<script src="https://unpkg.com/mammoth/mammoth.browser.min.js"></script>
+<script>
+const DOCX_FILE = 'pytania.docx';
+let questions = [], order = [], pos = 0, current = null;
+
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } }
+
+// parsowanie HTML wygenerowanego przez mammoth -> pytania z obrazkami
+function parseFromHtml(html){
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const elems = Array.from(doc.body.querySelectorAll('p,h1,h2,h3,h4,h5,h6,div,ul,ol'));
+    const out = [];
+    let i = 0;
+    const isQuestionStart = s => {
+        if(!s) return false;
+        if(/^\s*\d{1,3}\s*[.)-–]\s*/.test(s)) return true;
+        if(s.includes('?') && s.length < 400) return true;
+        return false;
+    };
+    while(i < elems.length && out.length < 200){
+        const el = elems[i];
+        const text = (el.textContent || '').trim();
+        if(!isQuestionStart(text)){ i++; continue; }
+        // zbuduj blok pytania
+        let qtext = text;
+        const images = [];
+        // jeśli element zawiera <img> to dodaj
+        el.querySelectorAll && el.querySelectorAll('img').forEach(img => { if(img.src) images.push(img.src); });
+        i++;
+        // zbieraj kolejne elementy dopóki nie trafimy na kolejny pytanie
+        const choices = [];
+        let answerIndex = -1;
+        while(i < elems.length){
+            const e2 = elems[i];
+            const t2 = (e2.textContent || '').trim();
+            if(/^\s*\d{1,3}\s*[.)-–]\s*/.test(t2)) break;
+            // obrazy w bloku pytania
+            e2.querySelectorAll && e2.querySelectorAll('img').forEach(img => { if(img.src) images.push(img.src); });
+            // jeśli listy (ul/ol) -> wybierz li jako choice
+            if(e2.tagName.toLowerCase() === 'ul' || e2.tagName.toLowerCase() === 'ol'){
+                Array.from(e2.querySelectorAll('li')).forEach(li=>{
+                    const liText = (li.textContent||'').trim();
+                    if(liText){
+                        choices.push(liText);
+                        const low = liText.toLowerCase();
+                        if(low.includes('popraw')||low.includes('prawid')||low.includes('✔')||low.includes('✓')) answerIndex = choices.length-1;
+                    }
+                });
+                i++; continue;
+            }
+            // pojedyncze linie z opcjami typu "A. Tekst" lub "A) Tekst"
+            const optMatch = t2.match(/^([A-ZĄĆĘŁŃÓŚŹŻ])\s*[.)-–]?\s*(.+)$/);
+            if(optMatch){
+                choices.push(optMatch[2].trim());
+                const low = optMatch[2].toLowerCase();
+                if(low.includes('popraw')||low.includes('prawid')||low.includes('✔')||low.includes('✓')) answerIndex = choices.length-1;
+                i++; continue;
+            }
+            // linia zawierająca wiele opcji: "A. x B. y C. z"
+            if(/(?:[A-ZĄĆĘŁŃÓŚŹŻ]\s*[.)-–]\s*)/.test(t2) && (t2.match(/[A-ZĄĆĘŁŃÓŚŹŻ]\s*[.)-–]\s*/g)||[]).length >= 2){
+                const parts = t2.split(/(?=[A-ZĄĆĘŁŃÓŚŹŻ]\s*[.)-–]\s*)/).map(s=>s.trim()).filter(Boolean);
+                parts.forEach(p=>{
+                    const pText = p.replace(/^[A-ZĄĆĘŁŃÓŚŹŻ]\s*[.)-–]?\s*/,'').trim();
+                    if(pText){ choices.push(pText); const low = pText.toLowerCase(); if(low.includes('popraw')||low.includes('prawid')||low.includes('✔')||low.includes('✓')) answerIndex = choices.length-1; }
+                });
+                i++; continue;
+            }
+            // krótkie linie traktujemy jako opcje jeżeli już mamy co najmniej jedną
+            if(choices.length > 0 && t2.length < 200){
+                choices.push(t2);
+                i++; continue;
+            }
+            break;
+        }
+        if(choices.length >= 2){
+            out.push({ id: out.length+1, text: qtext.trim(), choices, answer: answerIndex, image: images.length ? images[0] : null });
+        }
+    }
+    return out;
+}
+
+async function loadDocxWithImages(){
+    try {
+        const res = await fetch(DOCX_FILE);
+        if(!res.ok) throw new Error('Brak pliku ' + DOCX_FILE);
+        const ab = await res.arrayBuffer();
+        const result = await mammoth.convertToHtml({
+            arrayBuffer: ab,
+            convertImage: mammoth.images.inline(function(element){
+                return element.read("base64").then(function(imageBuffer){
+                    return { src: "data:" + element.contentType + ";base64," + imageBuffer };
+                });
+            })
+        });
+        return result.value || '';
+    } catch(e){
+        console.warn(e);
+        return '';
+    }
+}
+
+function render(q){
+    const root = document.getElementById('quiz');
+    root.innerHTML = '';
+    const qdiv = document.createElement('div');
+    qdiv.className = 'question';
+    qdiv.textContent = q.id + '. ' + q.text;
+    root.appendChild(qdiv);
+    if(q.image){
+        const img = document.createElement('img');
+        img.src = q.image;
+        img.alt = 'Ilustracja pytania';
+        root.appendChild(img);
+    }
+    const ul = document.createElement('ul'); ul.className='choices';
+    (q.choices||[]).forEach((c,i)=>{
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.className='choice';
+        btn.textContent = c;
+        btn.dataset.i = i;
+        btn.addEventListener('click', ()=> selectAnswer(btn,q));
+        li.appendChild(btn); ul.appendChild(li);
+    });
+    root.appendChild(ul);
+}
+
+function selectAnswer(btn,q){
+    const idx = Number(btn.dataset.i);
+    const all = document.querySelectorAll('button.choice');
+    all.forEach(b=>b.disabled=true);
+    if(typeof q.answer === 'number' && q.answer >= 0){
+        if(idx === q.answer) btn.classList.add('correct'); else {
+            btn.classList.add('wrong');
+            const corr = Array.from(all).find(b=>Number(b.dataset.i)===q.answer);
+            if(corr) corr.classList.add('correct');
+        }
+    } else {
+        btn.classList.add('correct');
+    }
+}
+
+function showNext(){
+    if(pos >= order.length){
+        document.getElementById('quiz').innerHTML = '<div style="font-size:1.2rem;font-weight:700;color:#1a7f1a">NAUCZYLES SIE ZJEBIE</div>';
+        document.getElementById('ok').disabled=true; return;
+    }
+    const idx = order[pos++];
+    current = questions[idx];
+    render(current);
+}
+
+document.getElementById('ok').addEventListener('click', ()=> showNext());
+
+(async function init(){
+    document.getElementById('status').textContent = 'Pobieram pytania.docx i obrazy…';
+    const html = await loadDocxWithImages();
+    if(!html){
+        document.getElementById('status').textContent = 'Nie znaleziono pytania.docx lub plik nieprawidłowy. Uruchom serwer i umieść pytania.docx w tym katalogu.';
+        document.getElementById('ok').disabled = true;
+        return;
+    }
+    const parsed = parseFromHtml(html);
+    if(!parsed || parsed.length === 0){
+        document.getElementById('status').textContent = 'Parser nie znalazł pytań — wklej fragment docx (tekst) jeśli chcesz dopasować reguły.';
+        document.getElementById('ok').disabled = true;
+        return;
+    }
+    questions = parsed.slice(0,200);
+    order = questions.map((_,i)=>i);
+    shuffle(order);
+    pos = 0;
+    document.getElementById('status').textContent = 'Pobrano pytań: ' + questions.length;
+    document.getElementById('ok').disabled = false;
+    showNext();
+})();
+</script>
+</body>
+</html>
